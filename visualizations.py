@@ -587,3 +587,204 @@ def _knit_noise(x, y):
     import math
     noise = math.sin(x * 0.3 + y * 0.2) * 4 + math.cos(x * 0.15 - y * 0.25) * 3
     return int(noise)
+
+
+def plot_pre_post_replenishment_preview(
+    before_colors: List[Dict[str, Any]],
+    after_colors: List[Dict[str, Any]],
+    project_type: str = '',
+    pattern_type: str = 'stripes'
+) -> go.Figure:
+    if not before_colors and not after_colors:
+        return go.Figure()
+
+    fig = go.Figure()
+
+    before_hex = [c.get('color_hex', '#BDC3C7') for c in before_colors if c.get('color_hex')]
+    after_hex = [c.get('color_hex', '#BDC3C7') for c in after_colors if c.get('color_hex')]
+
+    n_before = max(1, len(before_hex))
+    n_after = max(1, len(after_hex))
+    total = n_before + n_after + 1
+
+    for i, h in enumerate(before_hex):
+        x0 = i / total
+        x1 = (i + 1) / total
+        fig.add_shape(
+            type='rect',
+            x0=x0, y0=0.55,
+            x1=x1, y1=1,
+            xref='paper', yref='paper',
+            fillcolor=h,
+            line=dict(color='white', width=3)
+        )
+        label = before_colors[i].get('color_name', h)
+        alloc = before_colors[i].get('allocated_quantity', 0)
+        fig.add_annotation(
+            x=(x0 + x1) / 2,
+            y=0.775,
+            xref='paper', yref='paper',
+            text=f"{label}<br>{alloc}",
+            showarrow=False,
+            font=dict(
+                family='Microsoft YaHei',
+                size=10,
+                color=_get_text_color(h)
+            )
+        )
+
+    fig.add_shape(
+        type='rect',
+        x0=n_before / total, y0=0,
+        x1=(n_before + 1) / total, y1=1,
+        xref='paper', yref='paper',
+        fillcolor='#F5F5F5',
+        line=dict(color='#DDD', width=1)
+    )
+    fig.add_annotation(
+        x=(n_before + 0.5) / total,
+        y=0.5,
+        xref='paper', yref='paper',
+        text='→补货→',
+        showarrow=False,
+        font=dict(
+            family='Microsoft YaHei',
+            size=14,
+            color='#666'
+        ),
+        textangle=-90
+    )
+
+    for i, h in enumerate(after_hex):
+        x0 = (n_before + 1 + i) / total
+        x1 = (n_before + 2 + i) / total
+        fig.add_shape(
+            type='rect',
+            x0=x0, y0=0.55,
+            x1=x1, y1=1,
+            xref='paper', yref='paper',
+            fillcolor=h,
+            line=dict(color='white', width=3)
+        )
+        label = after_colors[i].get('color_name', h)
+        total_q = after_colors[i].get('allocated_quantity', 0) + after_colors[i].get('replenish_quantity', 0)
+        replenish = after_colors[i].get('replenish_quantity', 0)
+        suffix = f"+{replenish}" if replenish > 0 else ""
+        fig.add_annotation(
+            x=(x0 + x1) / 2,
+            y=0.775,
+            xref='paper', yref='paper',
+            text=f"{label}<br>{total_q}{suffix}",
+            showarrow=False,
+            font=dict(
+                family='Microsoft YaHei',
+                size=10,
+                color=_get_text_color(h)
+            )
+        )
+
+    if before_hex:
+        n_rgb = []
+        for h in before_hex:
+            h = h.lstrip('#')
+            n_rgb.append((int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)))
+        width_small = 300
+        height_small = 100
+        for y in range(height_small):
+            for x in range(width_small):
+                color_idx = (x * len(n_rgb) // width_small) % len(n_rgb)
+                r, g, b = n_rgb[color_idx]
+                noise = _knit_noise(x, y)
+                r = max(0, min(255, r + noise))
+                g = max(0, min(255, g + noise))
+                b = max(0, min(255, b + noise))
+
+    if after_hex:
+        pass
+
+    fig.add_annotation(
+        x=n_before / (2 * total),
+        y=0.275,
+        xref='paper', yref='paper',
+        text='补货前配色',
+        showarrow=False,
+        font=dict(family='Microsoft YaHei', size=13, color='#333', bold=True)
+    )
+    fig.add_annotation(
+        x=(n_before + 1 + n_after / 2) / total,
+        y=0.275,
+        xref='paper', yref='paper',
+        text='补货后配色',
+        showarrow=False,
+        font=dict(family='Microsoft YaHei', size=13, color='#333', bold=True)
+    )
+    fig.add_annotation(
+        x=n_before / (2 * total),
+        y=0.05,
+        xref='paper', yref='paper',
+        text=f'（仅库存可分配部分）',
+        showarrow=False,
+        font=dict(family='Microsoft YaHei', size=10, color='#888')
+    )
+    fig.add_annotation(
+        x=(n_before + 1 + n_after / 2) / total,
+        y=0.05,
+        xref='paper', yref='paper',
+        text=f'（含建议补货部分）',
+        showarrow=False,
+        font=dict(family='Microsoft YaHei', size=10, color='#888')
+    )
+
+    title_text = f'{project_type} - 补货前后成品配色对比' if project_type else '补货前后成品配色对比'
+    fig.update_layout(
+        title=dict(
+            text=title_text,
+            font=dict(size=16, family='Microsoft YaHei'),
+            x=0.5
+        ),
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[0, 1]),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[0, 1]),
+        height=280,
+        margin=dict(l=10, r=10, t=50, b=10),
+        plot_bgcolor='white',
+        paper_bgcolor='white'
+    )
+    return fig
+
+
+def plot_multi_project_metrics_summary(
+    summary_data: Dict[str, Any]
+) -> go.Figure:
+    metrics = [
+        ('项目数量', summary_data.get('project_count', 0), '#3498DB'),
+        ('平均可完成度', summary_data.get('average_feasibility', 0), '#27AE60'),
+        ('冲突数', summary_data.get('conflict_count', 0), '#E74C3C'),
+        ('颜色复用分', summary_data.get('reuse_score', 0), '#8E44AD'),
+        ('补货总量', summary_data.get('total_shortage_quantity', 0), '#E67E22'),
+        ('补货总成本', summary_data.get('total_shortage_cost', 0), '#F39C12')
+    ]
+
+    fig = go.Figure()
+
+    for i, (name, value, color) in enumerate(metrics):
+        is_cost = '成本' in name
+        display_val = f"¥{value:.1f}" if is_cost else (f"{value:.1f}" if isinstance(value, float) else str(value))
+
+        fig.add_trace(go.Indicator(
+            mode='number',
+            value=float(value) if isinstance(value, (int, float)) else 0,
+            title=dict(text=name, font=dict(size=14, family='Microsoft YaHei')),
+            number=dict(
+                font=dict(size=28, family='Microsoft YaHei', color=color),
+                prefix='¥' if is_cost else '',
+                valueformat='.1f'
+            ),
+            domain={'row': 0, 'column': i}
+        ))
+
+    fig.update_layout(
+        grid={'rows': 1, 'columns': len(metrics), 'pattern': 'independent'},
+        height=200,
+        margin=dict(l=10, r=10, t=30, b=10)
+    )
+    return fig

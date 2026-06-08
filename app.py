@@ -13,7 +13,9 @@ from visualizations import (
     plot_color_swatch,
     plot_project_match_radar,
     plot_inventory_treemap,
-    simulate_knit_pattern
+    simulate_knit_pattern,
+    plot_pre_post_replenishment_preview,
+    plot_multi_project_metrics_summary
 )
 from color_theory import generate_color_schemes, recommend_project_patterns
 from inventory_optimizer import (
@@ -23,6 +25,31 @@ from inventory_optimizer import (
     inventory_health_score,
     get_health_label,
     get_material_recommendations
+)
+from multi_project_analyzer import (
+    ProjectRequirement,
+    PROJECT_YARN_REQUIREMENTS,
+    PROJECT_SIZE_OPTIONS,
+    PRIORITY_WEIGHTS,
+    aggregate_project_analysis,
+    calculate_long_unused_consumption_potential,
+    export_report_csv
+)
+from multi_project_strategy import (
+    compute_optimal_allocation,
+    compare_strategies,
+    STRATEGY_NAMES
+)
+from multi_project_visualizations import (
+    plot_project_feasibility_radar,
+    plot_inventory_change_comparison,
+    plot_budget_allocation,
+    plot_strategy_comparison_bar,
+    plot_conflict_heatmap,
+    plot_replenishment_priority,
+    plot_long_unused_consumption_gauge,
+    plot_color_reuse_sunburst,
+    plot_project_color_allocation
 )
 
 
@@ -89,6 +116,20 @@ st.markdown("""
         border-radius: 5px;
         border-left: 4px solid #27AE60;
         margin-bottom: 0.5rem;
+    }
+    .project-card {
+        background: linear-gradient(135deg, #FFFAF0 0%, #FFF8DC 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        border: 1px solid #DEB887;
+        margin-bottom: 1rem;
+    }
+    .strategy-card {
+        background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%);
+        padding: 0.8rem;
+        border-radius: 8px;
+        border-left: 4px solid #1976D2;
+        margin-bottom: 0.8rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -234,11 +275,12 @@ def render_dashboard(df, selected_schemes, days_threshold):
 
     st.markdown("---")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 库存可视化分析",
         "🎨 颜色搭配推荐",
         "💡 编织项目匹配",
-        "🔧 库存优化中心"
+        "🔧 库存优化中心",
+        "📋 多项目规划与补货决策"
     ])
 
     with tab1:
@@ -252,6 +294,9 @@ def render_dashboard(df, selected_schemes, days_threshold):
 
     with tab4:
         render_inventory_optimization(df, report, long_unused)
+
+    with tab5:
+        render_multi_project_planning(df, days_threshold)
 
 
 def render_inventory_analysis(df, stats, report):
@@ -558,6 +603,349 @@ def render_inventory_optimization(df, report, long_unused):
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
+def render_multi_project_planning(df, days_threshold):
+    st.markdown('<div class="section-header">📋 多项目编织规划与补货决策中心</div>', unsafe_allow_html=True)
+
+    if 'projects' not in st.session_state:
+        st.session_state.projects = []
+
+    with st.expander("➕ 添加新项目", expanded=True):
+        render_project_creation_form(df)
+
+    if not st.session_state.projects:
+        st.info("👆 请先添加至少一个编织项目，系统将自动进行综合分析与补货决策")
+        return
+
+    render_project_list_editor(df)
+
+    st.markdown('<div class="section-header">🔬 跨项目综合分析视图</div>', unsafe_allow_html=True)
+
+    projects = st.session_state.projects
+
+    analysis_result = aggregate_project_analysis(projects, df)
+    summary = analysis_result['summary']
+
+    metrics_fig = plot_multi_project_metrics_summary(summary)
+    st.plotly_chart(metrics_fig, use_container_width=True)
+
+    col_a1, col_a2 = st.columns(2)
+    with col_a1:
+        radar_fig = plot_project_feasibility_radar(analysis_result['feasibilities'])
+        st.plotly_chart(radar_fig, use_container_width=True)
+
+    with col_a2:
+        long_unused_potential = calculate_long_unused_consumption_potential(
+            df, projects, analysis_result['feasibilities'], days_threshold
+        )
+        gauge_fig = plot_long_unused_consumption_gauge(long_unused_potential)
+        st.plotly_chart(gauge_fig, use_container_width=True)
+
+        st.markdown(f"""
+        <div style="margin-top: 10px; padding: 12px; background: #E8F8F5; border-radius: 8px;">
+            <div style="font-weight: bold; color: #27AE60;">📦 长期未使用线材消耗潜力</div>
+            <div style="font-size: 0.9rem; margin-top: 8px;">
+                可消耗: <b>{long_unused_potential.get('consumable_count', 0)}</b> 种颜色
+                共 <b>{long_unused_potential.get('consumable_quantity', 0)}</b> 卷
+                释放资金 <b>¥{long_unused_potential.get('locked_value_saved', 0):.1f}</b>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        reuse_info = analysis_result['reuse_efficiency']
+        if reuse_info.get('reusable_colors'):
+            sunburst_fig = plot_color_reuse_sunburst(reuse_info)
+            st.plotly_chart(sunburst_fig, use_container_width=True)
+
+    with col_b2:
+        project_ids = [p.project_id for p in projects]
+        conflicts = analysis_result['conflicts']
+        if len(project_ids) >= 2:
+            conflict_fig = plot_conflict_heatmap(conflicts, project_ids)
+            st.plotly_chart(conflict_fig, use_container_width=True)
+
+            if conflicts:
+                st.markdown("**⚠️ 检测到的线材冲突：**")
+                for c in conflicts[:5]:
+                    sev_color = {'高': '#E74C3C', '中': '#F39C12', '低': '#3498DB'}.get(c['severity'], '#95A5A6')
+                    st.markdown(f"""
+                    <div style="padding: 8px; background: #FFF4E6; border-radius: 5px; border-left: 4px solid {sev_color}; margin-bottom: 6px;">
+                        <b style="color: {sev_color};">[{c['severity']}]</b>
+                        {c['project_1']} ↔ {c['project_2']}：
+                        {c['conflict_color']} 短缺 {c['shortage']}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="section-header">🎯 最优分配与补货策略</div>', unsafe_allow_html=True)
+
+    strategy_options = list(STRATEGY_NAMES.keys())
+    strategy_labels = list(STRATEGY_NAMES.values())
+
+    selected_strategy_label = st.radio(
+        "选择分配策略：",
+        strategy_labels,
+        horizontal=True,
+        help="优先消耗库存：最大化消耗现有库存特别是长期未使用的线材；最少补货成本：最小化补货金额；综合色彩协调度最高：优先保证配色效果"
+    )
+    selected_strategy = strategy_options[strategy_labels.index(selected_strategy_label)]
+
+    compare_all = st.checkbox("同时对比三种策略效果", value=False)
+
+    if compare_all:
+        comparison_result = compare_strategies(projects, analysis_result, df, days_threshold)
+        comp_fig = plot_strategy_comparison_bar(comparison_result['comparison'])
+        st.plotly_chart(comp_fig, use_container_width=True)
+
+        st.markdown("**📊 三种策略对比详情：**")
+        comp_df = comparison_result['comparison'].copy()
+        comp_df_display = comp_df.rename(columns={
+            'strategy_name': '策略名称',
+            'total_replenish_cost': '补货总成本(¥)',
+            'total_replenish_qty': '补货总量',
+            'average_harmony_score': '平均色彩协调度',
+            'average_long_unused_score': '库存消耗得分',
+            'color_reuse_score': '颜色复用分'
+        }).drop(columns=['strategy_code'])
+        st.dataframe(comp_df_display, use_container_width=True, hide_index=True)
+
+        allocation_result = comparison_result['strategy_results'][selected_strategy]
+    else:
+        allocation_result = compute_optimal_allocation(
+            projects, analysis_result, df, selected_strategy, days_threshold
+        )
+
+    st.markdown(f"### 当前策略：{STRATEGY_NAMES[selected_strategy]}")
+
+    alloc_summary = allocation_result['summary']
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    with sc1:
+        st.metric("库存消耗成本", f"¥{alloc_summary.get('total_allocation_cost', 0):.1f}")
+    with sc2:
+        st.metric("补货总成本", f"¥{alloc_summary.get('total_replenish_cost', 0):.1f}")
+    with sc3:
+        st.metric("补货总量", f"{alloc_summary.get('total_replenish_qty', 0):.1f}")
+    with sc4:
+        st.metric("平均色彩协调度", f"{alloc_summary.get('average_harmony_score', 0):.1f}")
+
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        inv_before = alloc_summary.get('inventory_before', {})
+        inv_after = alloc_summary.get('inventory_after', {})
+        inv_change_fig = plot_inventory_change_comparison(inv_before, inv_after)
+        st.plotly_chart(inv_change_fig, use_container_width=True)
+
+    with col_c2:
+        budget_fig = plot_budget_allocation(allocation_result.get('allocations', {}))
+        st.plotly_chart(budget_fig, use_container_width=True)
+
+    st.markdown('<div class="section-header">📦 各项目分配详情与配色预览</div>', unsafe_allow_html=True)
+
+    allocations = allocation_result.get('allocations', {})
+    for project in projects:
+        pid = project.project_id
+        alloc = allocations.get(pid, {})
+        feasibility = analysis_result['feasibilities'].get(pid, {})
+
+        with st.expander(f"🎨 {pid} - {project.project_type} ({project.target_size}) | 优先级: {project.delivery_priority}", expanded=True):
+            pc1, pc2 = st.columns([1, 2])
+            with pc1:
+                st.markdown(f"""
+                <div class="project-card">
+                    <div style="font-weight: bold; font-size: 1.1rem;">{project.project_type}</div>
+                    <div style="margin-top: 8px;">
+                        <b>尺寸:</b> {project.target_size}<br>
+                        <b>用色数:</b> {project.color_count}<br>
+                        <b>优先级:</b> {project.delivery_priority}<br>
+                        <b>可完成度:</b> <span style="color: #27AE60; font-weight: bold;">{feasibility.get('feasibility_score', 0)}%</span><br>
+                        <b>状态:</b> {feasibility.get('status', '')}<br>
+                        <b>色彩协调:</b> {alloc.get('harmony_score', 0)}<br>
+                        <b>库存消耗分:</b> {alloc.get('long_unused_consumption_score', 0)}
+                    </div>
+                    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #DEB887;">
+                        <b>库存消耗:</b> ¥{alloc.get('total_allocated_cost', 0):.1f}<br>
+                        <b>补货成本:</b> ¥{alloc.get('total_replenish_cost', 0):.1f}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with pc2:
+                allocated_colors = alloc.get('allocated_colors', [])
+                if allocated_colors:
+                    preview_fig = plot_pre_post_replenishment_preview(
+                        allocated_colors,
+                        allocated_colors,
+                        project_type=project.project_type
+                    )
+                    st.plotly_chart(preview_fig, use_container_width=True)
+
+                    color_alloc_fig = plot_project_color_allocation(
+                        alloc, title=f"{pid} 颜色分配方案"
+                    )
+                    if color_alloc_fig:
+                        st.plotly_chart(color_alloc_fig, use_container_width=True)
+
+            if allocated_colors:
+                st.markdown("**分配明细表：**")
+                alloc_detail = pd.DataFrame(allocated_colors)
+                display_cols = ['color_name', 'color_family', 'material', 'thickness',
+                                'allocated_quantity', 'replenish_quantity', 'total_needed', 'price']
+                available_cols = [c for c in display_cols if c in alloc_detail.columns]
+                display_df = alloc_detail[available_cols].copy()
+                display_df.columns = ['颜色名称', '色系', '材质', '粗细', '库存分配', '需补货', '总需求', '单价']
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.markdown('<div class="section-header">🛒 智能补货推荐清单</div>', unsafe_allow_html=True)
+
+    replenishment = allocation_result.get('replenishment', pd.DataFrame())
+    if len(replenishment) == 0:
+        st.success("🎉 恭喜！现有库存足以完成所有项目，无需补货")
+    else:
+        rep_fig = plot_replenishment_priority(replenishment)
+        st.plotly_chart(rep_fig, use_container_width=True)
+
+        st.markdown("**补货详细清单（已按综合优先级排序）：**")
+        rep_display = replenishment.copy()
+        cols_available = [c for c in ['project_id', 'project_type', 'color_name', 'color_family',
+                                       'material', 'thickness', 'shortage', 'unit_price',
+                                       'estimated_cost', 'priority', 'composite_score'] if c in rep_display.columns]
+        rep_display = rep_display[cols_available]
+        col_names = {
+            'project_id': '项目ID', 'project_type': '项目类型',
+            'color_name': '颜色名称', 'color_family': '色系',
+            'material': '材质', 'thickness': '粗细',
+            'shortage': '补货数量', 'unit_price': '单价',
+            'estimated_cost': '预计成本', 'priority': '优先级',
+            'composite_score': '综合优先级分'
+        }
+        rep_display.columns = [col_names[c] for c in cols_available]
+        st.dataframe(rep_display, use_container_width=True, hide_index=True)
+
+    st.markdown('<div class="section-header">📥 导出报告</div>', unsafe_allow_html=True)
+
+    csv_content = export_report_csv(analysis_result, allocation_result)
+
+    col_d1, col_d2 = st.columns([3, 1])
+    with col_d1:
+        st.download_button(
+            label="📥 下载完整分析报告 (CSV)",
+            data=csv_content,
+            file_name=f"多项目规划报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    with col_d2:
+        st.info("报告包含：项目分配结果、补货建议、库存变化摘要")
+
+
+def render_project_creation_form(df):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        project_types = list(PROJECT_YARN_REQUIREMENTS.keys())
+        project_type = st.selectbox("项目类型", project_types, key="new_project_type")
+
+        size_options = PROJECT_SIZE_OPTIONS.get(project_type, ['中号'])
+        target_size = st.selectbox("目标尺寸", size_options, key="new_project_size")
+
+        color_count = st.slider("预计用色数", min_value=2, max_value=6, value=3, key="new_color_count")
+
+        material_options = sorted(df['material'].unique().tolist()) if 'material' in df.columns else []
+        material_restrictions = st.multiselect(
+            "材质限制（可选，不选则不限制）",
+            material_options,
+            key="new_material_restrictions"
+        )
+
+    with col2:
+        color_options = df['color_name'].tolist()
+        hex_options = df['color_hex'].tolist()
+        display_options = [f"{name} ({hex_code})" if hex_code else name for name, hex_code in zip(color_options, hex_options)]
+
+        primary_idx = st.selectbox(
+            "主色偏好（可选）",
+            range(-1, len(display_options)),
+            format_func=lambda i: "无特别偏好" if i < 0 else display_options[i],
+            key="new_primary_color"
+        )
+
+        if primary_idx >= 0:
+            primary_color_preference = color_options[primary_idx]
+            primary_color_hex = hex_options[primary_idx]
+        else:
+            primary_color_preference = None
+            primary_color_hex = None
+
+        priority_options = list(PRIORITY_WEIGHTS.keys())
+        delivery_priority = st.selectbox(
+            "交付优先级",
+            priority_options,
+            index=priority_options.index('中'),
+            key="new_priority"
+        )
+
+        budget_limit = st.number_input(
+            "预算上限（元，0表示不限制）",
+            min_value=0.0, max_value=10000.0, value=0.0, step=50.0,
+            key="new_budget"
+        )
+
+    if st.button("➕ 添加到项目列表", use_container_width=True, type="primary"):
+        pid = f"P{len(st.session_state.projects) + 1:03d}"
+        project = ProjectRequirement(
+            project_id=pid,
+            project_type=project_type,
+            target_size=target_size,
+            primary_color_preference=primary_color_preference,
+            primary_color_hex=primary_color_hex,
+            material_restrictions=material_restrictions if material_restrictions else None,
+            budget_limit=budget_limit if budget_limit > 0 else None,
+            delivery_priority=delivery_priority,
+            color_count=color_count
+        )
+        st.session_state.projects.append(project)
+        st.success(f"✅ 项目 {pid} ({project_type}) 已添加！")
+
+
+def render_project_list_editor(df):
+    st.markdown(f"**当前共 {len(st.session_state.projects)} 个项目**")
+
+    for i, project in enumerate(st.session_state.projects):
+        col1, col2, col3 = st.columns([4, 1, 1])
+
+        with col1:
+            primary_info = f"主色: {project.primary_color_preference}" if project.primary_color_preference else "无主色偏好"
+            material_info = f"材质: {', '.join(project.material_restrictions)}" if project.material_restrictions else "材质: 不限"
+            budget_info = f"预算: ¥{project.budget_limit}" if project.budget_limit else "预算: 不限"
+
+            st.markdown(f"""
+            <div class="project-card">
+                <b>{project.project_id}</b> - {project.project_type} ({project.target_size})
+                &nbsp;|&nbsp; 优先级: <b>{project.delivery_priority}</b>
+                &nbsp;|&nbsp; 用色: {project.color_count}色
+                <br>
+                <span style="color: #666; font-size: 0.9rem;">
+                    {primary_info} &nbsp;|&nbsp; {material_info} &nbsp;|&nbsp; {budget_info}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            if st.button("⬆️ 上移", key=f"up_{i}", disabled=(i == 0)):
+                st.session_state.projects[i], st.session_state.projects[i - 1] = \
+                    st.session_state.projects[i - 1], st.session_state.projects[i]
+                st.rerun()
+
+        with col3:
+            if st.button("🗑️ 删除", key=f"del_{i}"):
+                st.session_state.projects.pop(i)
+                st.rerun()
+
+    if st.button("清空所有项目", type="secondary"):
+        st.session_state.projects = []
+        st.rerun()
+
+
 def main():
     uploaded_file, use_sample, selected_schemes, days_threshold = sidebar_section()
 
@@ -569,7 +957,7 @@ def main():
 
         st.markdown("---")
         st.markdown("### ✨ 功能亮点")
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.markdown("**📊 库存可视化**")
             st.caption("色系分布饼图、库存堆积柱状图、多层级对比分析")
@@ -582,6 +970,9 @@ def main():
         with col4:
             st.markdown("**🔧 库存优化**")
             st.caption("冗余/短缺识别、长期未使用分析、消耗方案推荐")
+        with col5:
+            st.markdown("**📋 多项目规划**")
+            st.caption("多项目联合规划、智能补货决策、三策略对比")
         return
 
     render_dashboard(df, selected_schemes, days_threshold)

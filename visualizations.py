@@ -92,13 +92,17 @@ def plot_inventory_stack_bar(material_thickness_data):
             x=0.5
         ),
         xaxis=dict(
-            title='材质',
-            titlefont=dict(family='Microsoft YaHei'),
+            title=dict(
+                text='材质',
+                font=dict(family='Microsoft YaHei')
+            ),
             tickfont=dict(family='Microsoft YaHei')
         ),
         yaxis=dict(
-            title='库存数量',
-            titlefont=dict(family='Microsoft YaHei'),
+            title=dict(
+                text='库存数量',
+                font=dict(family='Microsoft YaHei')
+            ),
             tickfont=dict(family='Microsoft YaHei')
         ),
         legend=dict(
@@ -146,19 +150,25 @@ def plot_material_comparison(material_dist):
             x=0.5
         ),
         xaxis=dict(
-            title='材质',
-            titlefont=dict(family='Microsoft YaHei'),
+            title=dict(
+                text='材质',
+                font=dict(family='Microsoft YaHei')
+            ),
             tickfont=dict(family='Microsoft YaHei')
         ),
         yaxis=dict(
-            title='数量',
-            titlefont=dict(color='#3498DB', family='Microsoft YaHei'),
+            title=dict(
+                text='数量',
+                font=dict(color='#3498DB', family='Microsoft YaHei')
+            ),
             tickfont=dict(color='#3498DB'),
             side='left'
         ),
         yaxis2=dict(
-            title='总价值',
-            titlefont=dict(color='#E74C3C', family='Microsoft YaHei'),
+            title=dict(
+                text='总价值',
+                font=dict(color='#E74C3C', family='Microsoft YaHei')
+            ),
             tickfont=dict(color='#E74C3C'),
             overlaying='y',
             side='right'
@@ -197,14 +207,18 @@ def plot_family_by_material(by_family_material):
             x=0.5
         ),
         xaxis=dict(
-            title='色系',
-            titlefont=dict(family='Microsoft YaHei'),
+            title=dict(
+                text='色系',
+                font=dict(family='Microsoft YaHei')
+            ),
             tickfont=dict(family='Microsoft YaHei'),
             tickangle=45
         ),
         yaxis=dict(
-            title='库存数量',
-            titlefont=dict(family='Microsoft YaHei'),
+            title=dict(
+                text='库存数量',
+                font=dict(family='Microsoft YaHei')
+            ),
             tickfont=dict(family='Microsoft YaHei')
         ),
         legend=dict(
@@ -246,14 +260,18 @@ def plot_redundant_shortage(analysis_result):
             x=0.5
         ),
         xaxis=dict(
-            title='色系',
-            titlefont=dict(family='Microsoft YaHei'),
+            title=dict(
+                text='色系',
+                font=dict(family='Microsoft YaHei')
+            ),
             tickfont=dict(family='Microsoft YaHei'),
             tickangle=45
         ),
         yaxis=dict(
-            title='占比 (%)',
-            titlefont=dict(family='Microsoft YaHei'),
+            title=dict(
+                text='占比 (%)',
+                font=dict(family='Microsoft YaHei')
+            ),
             tickfont=dict(family='Microsoft YaHei')
         ),
         legend=dict(font=dict(family='Microsoft YaHei')),
@@ -390,21 +408,69 @@ def plot_inventory_treemap(df):
 
     df_plot = df.copy()
     df_plot['color_hex_display'] = df_plot['color_hex'].fillna('#BDC3C7')
-    df_plot['label'] = df_plot['color_name'] + '<br>数量: ' + df_plot['quantity'].astype(str)
 
-    fig = px.treemap(
-        df_plot,
-        path=[px.Constant('全部库存'), 'material', 'color_family', 'color_name'],
-        values='quantity',
-        color='color_hex_display',
-        color_discrete_map='identity',
-        hover_data={
-            'quantity': True,
-            'material': True,
-            'thickness': True,
-            'color_hex': True
-        }
-    )
+    ids = []
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    hover_texts = []
+
+    root_id = 'root'
+    ids.append(root_id)
+    labels.append('全部库存')
+    parents.append('')
+    values.append(int(df_plot['quantity'].sum()))
+    colors.append('#FAFAFA')
+    hover_texts.append(f'全部库存<br>总数量: {df_plot["quantity"].sum()}')
+
+    for mat in df_plot['material'].unique():
+        mat_df = df_plot[df_plot['material'] == mat]
+        mat_id = f'mat_{mat}'
+        ids.append(mat_id)
+        labels.append(str(mat))
+        parents.append(root_id)
+        values.append(int(mat_df['quantity'].sum()))
+        colors.append('#F5F5F5')
+        hover_texts.append(f'材质: {mat}<br>数量: {mat_df["quantity"].sum()}')
+
+        for fam in mat_df['color_family'].unique():
+            fam_df = mat_df[mat_df['color_family'] == fam]
+            fam_id = f'fam_{mat}_{fam}'
+            ids.append(fam_id)
+            labels.append(str(fam))
+            parents.append(mat_id)
+            values.append(int(fam_df['quantity'].sum()))
+            colors.append(get_family_color(fam))
+            hover_texts.append(f'色系: {fam}<br>数量: {fam_df["quantity"].sum()}')
+
+            for _, row in fam_df.iterrows():
+                cid = f'color_{mat}_{fam}_{row["color_name"]}'
+                ids.append(cid)
+                labels.append(f'{row["color_name"]}<br>{row["quantity"]}')
+                parents.append(fam_id)
+                values.append(int(row['quantity']))
+                colors.append(row['color_hex_display'])
+                hover_texts.append(
+                    f'颜色: {row["color_name"]}<br>'
+                    f'色系: {row["color_family"]}<br>'
+                    f'材质: {row["material"]}<br>'
+                    f'粗细: {row.get("thickness", "-")}<br>'
+                    f'数量: {row["quantity"]}<br>'
+                    f'色号: {row.get("color_hex", "-")}'
+                )
+
+    fig = go.Figure(go.Treemap(
+        ids=ids,
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        hovertext=hover_texts,
+        hoverinfo='text',
+        texttemplate='%{label}',
+        textfont=dict(family='Microsoft YaHei', size=12)
+    ))
 
     fig.update_layout(
         title=dict(

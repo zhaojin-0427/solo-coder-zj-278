@@ -1133,6 +1133,11 @@ def render_season_capsule_planning(df, days_threshold, experience_library=None):
                 role_in_series=sp_role
             )
             st.session_state.series_projects.append(sp)
+            st.session_state.series_projects.sort(key=lambda p: p.delivery_order)
+            for idx, proj in enumerate(st.session_state.series_projects):
+                proj.delivery_order = idx + 1
+            st.session_state.series_result = None
+            st.session_state.series_comparison = None
             st.success(f"✅ 单品 {sp_id} ({sp_type}) 已添加到系列！")
             st.rerun()
 
@@ -1159,10 +1164,18 @@ def render_season_capsule_planning(df, days_threshold, experience_library=None):
                 if st.button("⬆️", key=f"sp_up_{i}", disabled=(i == 0)):
                     st.session_state.series_projects[i], st.session_state.series_projects[i - 1] = \
                         st.session_state.series_projects[i - 1], st.session_state.series_projects[i]
+                    for idx, proj in enumerate(st.session_state.series_projects):
+                        proj.delivery_order = idx + 1
+                    st.session_state.series_result = None
+                    st.session_state.series_comparison = None
                     st.rerun()
             with col_spd:
                 if st.button("🗑️", key=f"sp_del_{i}"):
                     st.session_state.series_projects.pop(i)
+                    for idx, proj in enumerate(st.session_state.series_projects):
+                        proj.delivery_order = idx + 1
+                    st.session_state.series_result = None
+                    st.session_state.series_comparison = None
                     st.rerun()
 
         if st.button("清空系列所有项目", type="secondary", key="sp_clear_all"):

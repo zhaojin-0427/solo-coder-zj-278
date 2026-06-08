@@ -608,6 +608,16 @@ def render_multi_project_planning(df, days_threshold):
 
     if 'projects' not in st.session_state:
         st.session_state.projects = []
+    if 'project_id_counter' not in st.session_state:
+        existing_ids = [p.project_id for p in st.session_state.projects]
+        max_num = 0
+        for pid in existing_ids:
+            try:
+                num = int(pid.replace('P', ''))
+                max_num = max(max_num, num)
+            except ValueError:
+                pass
+        st.session_state.project_id_counter = max_num + 1
 
     with st.expander("➕ 添加新项目", expanded=True):
         render_project_creation_form(df)
@@ -891,7 +901,9 @@ def render_project_creation_form(df):
         )
 
     if st.button("➕ 添加到项目列表", use_container_width=True, type="primary"):
-        pid = f"P{len(st.session_state.projects) + 1:03d}"
+        pid_num = st.session_state.project_id_counter
+        pid = f"P{pid_num:03d}"
+        st.session_state.project_id_counter += 1
         project = ProjectRequirement(
             project_id=pid,
             project_type=project_type,
@@ -943,6 +955,7 @@ def render_project_list_editor(df):
 
     if st.button("清空所有项目", type="secondary"):
         st.session_state.projects = []
+        st.session_state.project_id_counter = 1
         st.rerun()
 
 

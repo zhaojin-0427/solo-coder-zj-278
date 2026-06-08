@@ -16,7 +16,12 @@ def plot_project_feasibility_radar(
     feasibilities: Dict[str, Dict[str, Any]]
 ) -> go.Figure:
     if not feasibilities:
-        return go.Figure()
+        fig = go.Figure()
+        fig.update_layout(
+            title=dict(text='暂无项目数据', font=dict(size=16, family='Microsoft YaHei')),
+            height=400
+        )
+        return fig
 
     categories = [
         '数量可完成度',
@@ -28,30 +33,47 @@ def plot_project_feasibility_radar(
 
     fig = go.Figure()
 
-    colors = px.colors.qualitative.Set3
+    fallback_colors = ['#3498DB', '#E74C3C', '#27AE60', '#F39C12', '#8E44AD',
+                       '#1ABC9C', '#E67E22', '#9B59B6', '#34495E', '#16A085']
+    try:
+        colors = list(px.colors.qualitative.Set3)
+    except Exception:
+        colors = fallback_colors
+
+    def _hex_to_rgba(hex_color, alpha=0.2):
+        try:
+            h = hex_color.lstrip('#')
+            r = int(h[0:2], 16)
+            g = int(h[2:4], 16)
+            b = int(h[4:6], 16)
+            return f'rgba({r},{g},{b},{alpha})'
+        except Exception:
+            return f'rgba(52,152,219,{alpha})'
 
     for i, (pid, f) in enumerate(feasibilities.items()):
-        qty_feas = f.get('quantity_feasibility', 0) * 100
-        color_feas = f.get('color_feasibility', 0) * 100
-        budget_feas = 100 if f.get('budget_ok', True) else 40
-        priority_feas = f.get('priority_weight', 0.5) * 100
-        overall = f.get('feasibility_score', 0)
+        qty_feas = float(f.get('quantity_feasibility', 0) or 0) * 100
+        color_feas = float(f.get('color_feasibility', 0) or 0) * 100
+        budget_feas = 100.0 if f.get('budget_ok', True) else 40.0
+        priority_feas = float(f.get('priority_weight', 0.5) or 0.5) * 100
+        overall = float(f.get('feasibility_score', 0) or 0)
 
         values = [qty_feas, color_feas, budget_feas, priority_feas, overall]
-        values += values[:1]
+        values = [float(v) for v in values]
+        values_closed = values + values[:1]
 
         cat_ext = categories + categories[:1]
 
         label = f"{pid} ({f.get('project_type', '')})"
+        color = colors[i % len(colors)]
 
         fig.add_trace(go.Scatterpolar(
-            r=values,
+            r=values_closed,
             theta=cat_ext,
             fill='toself',
             name=label,
-            fillcolor=f'rgba{tuple(list(px.colors.hex_to_rgb(colors[i % len(colors)])) + [0.2])}',
-            line=dict(color=colors[i % len(colors)], width=2),
-            marker=dict(size=6, color=colors[i % len(colors)]),
+            fillcolor=_hex_to_rgba(color, 0.2),
+            line=dict(color=color, width=2),
+            marker=dict(size=6, color=color),
             hovertemplate='%{theta}: %{r:.1f}<extra></extra>'
         ))
 

@@ -596,12 +596,20 @@ def plot_pre_post_replenishment_preview(
     pattern_type: str = 'stripes'
 ) -> go.Figure:
     if not before_colors and not after_colors:
-        return go.Figure()
+        fig = go.Figure()
+        fig.update_layout(
+            title=dict(text='暂无配色数据', font=dict(size=16, family='Microsoft YaHei')),
+            height=280
+        )
+        return fig
 
     fig = go.Figure()
 
-    before_hex = [c.get('color_hex', '#BDC3C7') for c in before_colors if c.get('color_hex')]
-    after_hex = [c.get('color_hex', '#BDC3C7') for c in after_colors if c.get('color_hex')]
+    valid_before = [c for c in before_colors if c.get('color_hex')]
+    valid_after = [c for c in after_colors if c.get('color_hex')]
+
+    before_hex = [c['color_hex'] for c in valid_before]
+    after_hex = [c['color_hex'] for c in valid_after]
 
     n_before = max(1, len(before_hex))
     n_after = max(1, len(after_hex))
@@ -618,20 +626,22 @@ def plot_pre_post_replenishment_preview(
             fillcolor=h,
             line=dict(color='white', width=3)
         )
-        label = before_colors[i].get('color_name', h)
-        alloc = before_colors[i].get('allocated_quantity', 0)
-        fig.add_annotation(
-            x=(x0 + x1) / 2,
-            y=0.775,
-            xref='paper', yref='paper',
-            text=f"{label}<br>{alloc}",
-            showarrow=False,
-            font=dict(
-                family='Microsoft YaHei',
-                size=10,
-                color=_get_text_color(h)
+        if i < len(valid_before):
+            c = valid_before[i]
+            label = c.get('color_name', h)
+            alloc = c.get('allocated_quantity', 0)
+            fig.add_annotation(
+                x=(x0 + x1) / 2,
+                y=0.775,
+                xref='paper', yref='paper',
+                text=f"{label}<br>{alloc}",
+                showarrow=False,
+                font=dict(
+                    family='Microsoft YaHei',
+                    size=10,
+                    color=_get_text_color(h)
+                )
             )
-        )
 
     fig.add_shape(
         type='rect',
@@ -666,41 +676,24 @@ def plot_pre_post_replenishment_preview(
             fillcolor=h,
             line=dict(color='white', width=3)
         )
-        label = after_colors[i].get('color_name', h)
-        total_q = after_colors[i].get('allocated_quantity', 0) + after_colors[i].get('replenish_quantity', 0)
-        replenish = after_colors[i].get('replenish_quantity', 0)
-        suffix = f"+{replenish}" if replenish > 0 else ""
-        fig.add_annotation(
-            x=(x0 + x1) / 2,
-            y=0.775,
-            xref='paper', yref='paper',
-            text=f"{label}<br>{total_q}{suffix}",
-            showarrow=False,
-            font=dict(
-                family='Microsoft YaHei',
-                size=10,
-                color=_get_text_color(h)
+        if i < len(valid_after):
+            c = valid_after[i]
+            label = c.get('color_name', h)
+            total_q = c.get('allocated_quantity', 0) + c.get('replenish_quantity', 0)
+            replenish = c.get('replenish_quantity', 0)
+            suffix = f"+{replenish}" if replenish > 0 else ""
+            fig.add_annotation(
+                x=(x0 + x1) / 2,
+                y=0.775,
+                xref='paper', yref='paper',
+                text=f"{label}<br>{total_q}{suffix}",
+                showarrow=False,
+                font=dict(
+                    family='Microsoft YaHei',
+                    size=10,
+                    color=_get_text_color(h)
+                )
             )
-        )
-
-    if before_hex:
-        n_rgb = []
-        for h in before_hex:
-            h = h.lstrip('#')
-            n_rgb.append((int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)))
-        width_small = 300
-        height_small = 100
-        for y in range(height_small):
-            for x in range(width_small):
-                color_idx = (x * len(n_rgb) // width_small) % len(n_rgb)
-                r, g, b = n_rgb[color_idx]
-                noise = _knit_noise(x, y)
-                r = max(0, min(255, r + noise))
-                g = max(0, min(255, g + noise))
-                b = max(0, min(255, b + noise))
-
-    if after_hex:
-        pass
 
     fig.add_annotation(
         x=n_before / (2 * total),
@@ -708,7 +701,7 @@ def plot_pre_post_replenishment_preview(
         xref='paper', yref='paper',
         text='补货前配色',
         showarrow=False,
-        font=dict(family='Microsoft YaHei', size=13, color='#333', bold=True)
+        font=dict(family='Microsoft YaHei', size=13, color='#333')
     )
     fig.add_annotation(
         x=(n_before + 1 + n_after / 2) / total,
@@ -716,7 +709,7 @@ def plot_pre_post_replenishment_preview(
         xref='paper', yref='paper',
         text='补货后配色',
         showarrow=False,
-        font=dict(family='Microsoft YaHei', size=13, color='#333', bold=True)
+        font=dict(family='Microsoft YaHei', size=13, color='#333')
     )
     fig.add_annotation(
         x=n_before / (2 * total),
